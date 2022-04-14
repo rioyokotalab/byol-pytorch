@@ -12,10 +12,6 @@ from byol_pytorch import BYOL
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 
-# test model, a resnet 50
-
-resnet = models.resnet50(pretrained=True)
-
 # arguments
 
 parser = argparse.ArgumentParser(description="byol-lightning-test")
@@ -31,6 +27,7 @@ parser.add_argument("--epochs", type=int, default=1000, help='epochs')
 parser.add_argument("--num_gpus", type=int, default=2, help='num_gpus')
 parser.add_argument("--lr", type=float, default=3e-4, help='lr')
 parser.add_argument("--imaeg_size", type=int, default=256, help='image_size')
+parser.add_argument("--resnet_pretrain", action="store_true")
 
 parser.add_argument("--result_path",
                     type=str,
@@ -38,6 +35,10 @@ parser.add_argument("--result_path",
                     help='path to your folder of result')
 
 args = parser.parse_args()
+
+# test model, a resnet 50
+
+resnet = models.resnet50(pretrained=args.resnet_pretrain)
 
 # constants
 
@@ -136,7 +137,8 @@ if __name__ == '__main__':
                                   hidden_layer='avgpool',
                                   projection_size=256,
                                   projection_hidden_size=4096,
-                                  moving_average_decay=0.99)
+                                  moving_average_decay=0.99,
+                                  use_momentum=True)
 
     # wandb.init(project="byol_pytorh_test",
     #            entity="tomo",
