@@ -64,6 +64,7 @@ class SelfSupervisedLearner(pl.LightningModule):
 
     def training_step(self, images, _):
         loss = self.forward(images)
+        self.log("train/loss", loss)
         return {'loss': loss}
 
     def configure_optimizers(self):
@@ -83,13 +84,14 @@ def expand_greyscale(t):
 
 class ImagesDataset(Dataset):
 
-    def __init__(self, folder, image_size, subset):
+    def __init__(self, folder, image_size, subset=None):
         super().__init__()
         self.folder = folder
         self.paths = []
         self.subset = subset
+        ds_root = f"{folder}/{subset}" if subset else f"{folder}"
 
-        for path in Path(f'{folder}/{subset}').glob('**/*'):
+        for path in Path(ds_root).glob('**/*'):
             _, ext = os.path.splitext(path)
             if ext.lower() in IMAGE_EXTS:
                 self.paths.append(path)
@@ -116,16 +118,17 @@ class ImagesDataset(Dataset):
 # main
 
 if __name__ == '__main__':
-    train_ds = ImagesDataset(args.image_folder, IMAGE_SIZE, "train")
+    train_ds = ImagesDataset(args.image_folder, IMAGE_SIZE)
+    # train_ds = ImagesDataset(args.image_folder, IMAGE_SIZE, "train")
     train_loader = DataLoader(train_ds,
                               batch_size=BATCH_SIZE,
                               num_workers=NUM_WORKERS,
                               shuffle=True)
-    val_ds = ImagesDataset(args.image_folder, IMAGE_SIZE, "val")
-    val_loader = DataLoader(val_ds,
-                            batch_size=BATCH_SIZE,
-                            num_workers=NUM_WORKERS,
-                            shuffle=False)
+    # val_ds = ImagesDataset(args.image_folder, IMAGE_SIZE, "val")
+    # val_loader = DataLoader(val_ds,
+    #                         batch_size=BATCH_SIZE,
+    #                         num_workers=NUM_WORKERS,
+    #                         shuffle=False)
 
     model = SelfSupervisedLearner(resnet,
                                   lr=args.lr,
@@ -155,4 +158,4 @@ if __name__ == '__main__':
                          logger=logger,
                          default_root_dir=args.result_path)
 
-    trainer.fit(model, train_loader, val_loader)
+    trainer.fit(model, train_loader)
