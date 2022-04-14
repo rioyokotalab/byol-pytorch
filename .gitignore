@@ -1,3 +1,14 @@
+# extra
+*.out
+*.o*
+*.e*
+out/
+output/
+results_root/
+tmp/
+wandb/
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
