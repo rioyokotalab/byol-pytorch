@@ -156,6 +156,7 @@ if __name__ == '__main__':
                          accelerator="gpu",
                          strategy="ddp",
                          logger=logger,
+                         log_every_n_steps=1,
                          default_root_dir=args.result_path)
 
     trainer.fit(model, train_loader)
