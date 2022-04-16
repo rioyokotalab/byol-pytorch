@@ -145,17 +145,19 @@ if __name__ == '__main__':
         # torch.cuda.set_device(local_rank)
         # device = torch.device("cuda", local_rank)
 
+    local_batch_size = BATCH_SIZE // world_size
+
     print_rank("start main")
     # print_rank("start main num_workers:", num_workers)
     # train_ds = ImagesDataset(args.image_folder, IMAGE_SIZE)
     train_ds = ImagesDataset(args.image_folder, IMAGE_SIZE, "train")
     train_loader = DataLoader(train_ds,
-                              batch_size=BATCH_SIZE,
+                              batch_size=local_batch_size,
                               num_workers=num_workers,
                               shuffle=True)
     # val_ds = ImagesDataset(args.image_folder, IMAGE_SIZE, "val")
     # val_loader = DataLoader(val_ds,
-    #                         batch_size=BATCH_SIZE,
+    #                         batch_size=local_batch_size,
     #                         num_workers=NUM_WORKERS,
     #                         shuffle=False)
 
@@ -172,11 +174,13 @@ if __name__ == '__main__':
     #            entity="tomo",
     #            name="pretrain-byol",
     #            config=args)
-    logger = WandbLogger(project="byol_pytorh_test",
-                         entity="tomo",
-                         name="pretrain-byol",
-                         log_model="all",
-                         config=args)
+    logger = True
+    if rank == 0:
+        logger = WandbLogger(project="byol_pytorh_test",
+                             entity="tomo",
+                             name="pretrain-byol",
+                             log_model="all",
+                             config=args)
 
     print_rank("start setup train")
     trainer = pl.Trainer(
