@@ -1,4 +1,5 @@
 import os
+# import sys
 import argparse
 import logging
 import multiprocessing
@@ -12,6 +13,9 @@ from torch.utils.data import DataLoader, Dataset
 from byol_pytorch import BYOL
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.loggers import CSVLogger, TensorBoardLogger
+from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.callbacks import ProgressBarBase
 
 from utils import dist_setup, dist_cleanup
 from utils import print_rank, myget_rank_size
@@ -79,6 +83,22 @@ class SelfSupervisedLearner(pl.LightningModule):
     def training_step(self, images, _):
         loss = self.forward(images)
         self.log("train/loss", loss)
+
+        max_epochs = self.trainer.max_epochs
+        max_steps = self.trainer.max_steps
+        progress_callback = None
+        for callback in self.trainer.callbacks:
+            if isinstance(callback, ProgressBarBase):
+                progress_callback = callback
+                break
+        if progress_callback is not None:
+            max_steps = progress_callback.main_progress_bar.total
+        epoch = self.current_epoch
+        global_step = self.global_step
+        head = f"Epoch: [{epoch}/{max_epochs}] "
+        head += f"Iters: [{global_step}/{max_steps}]"
+        logger.info(f"{head} train/loss: {loss}")
+
         return {'loss': loss}
 
     def configure_optimizers(self):
@@ -147,9 +167,32 @@ if __name__ == '__main__':
         # torch.cuda.set_device(local_rank)
         # device = torch.device("cuda", local_rank)
 
+    ##########################################################################
+    # log file prepare
+    log_dir = os.path.join(args.result_path, "log_dir")
+    os.makedirs(log_dir, exist_ok=True)
+    plain_formatter = logging.Formatter(
+        "[%(asctime)s] %(name)s %(levelname)s: %(message)s",
+        datefmt="%m/%d %H:%M:%S")
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG)
+    # if rank == 0:
+    #     s_handler = logging.StreamHandler(stream=sys.stdout)
+    #     s_handler.setFormatter(plain_formatter)
+    #     s_handler.setLevel(logging.DEBUG)
+    #     logger.addHandler(s_handler)
+    filename = f"console_gpu{rank}.log"
+    f_handler = logging.FileHandler(os.path.join(log_dir, filename))
+    f_handler.setFormatter(plain_formatter)
+    f_handler.setLevel(logging.DEBUG)
+    logger.addHandler(f_handler)
+    logger.propagate = False
+    ##########################################################################
+
     local_batch_size = BATCH_SIZE // world_size
 
     print_rank("start main")
+    logger.info("start main")
     # print_rank("start main num_workers:", num_workers)
     # train_ds = ImagesDataset(args.image_folder, IMAGE_SIZE)
     # train_ds = ImagesDataset(args.image_folder, IMAGE_SIZE, "train")
@@ -176,33 +219,55 @@ if __name__ == '__main__':
                                   moving_average_decay=0.99,
                                   use_momentum=True)
 
-    # wandb.init(project="byol_pytorh_test",
-    #            entity="tomo",
-    #            name="pretrain-byol",
-    #            config=args)
-    logger = True
-    if rank == 0:
-        logger = WandbLogger(project="byol_pytorh_test",
-                             entity="tomo",
-                             name="pretrain-byol",
-                             log_model="all",
-                             config=args)
-
     print_rank("start setup train")
+    logger.info("start setup train")
+
+    csv_dir = os.path.join(args.result_path, "csv_dir")
+    csv_logger = CSVLogger(save_dir=csv_dir, flush_logs_every_n_steps=1)
+    tf_dir = os.path.join(args.result_path, "tf_logs")
+    tf_logger = TensorBoardLogger(save_dir=tf_dir)
+    lightning_loggers = [csv_logger, tf_logger]
+
+    if rank == 0:
+        # wandb.init(project="byol_pytorh_test",
+        #            entity="tomo",
+        #            name="pretrain-byol",
+        #            config=args)
+        wandb_logger = WandbLogger(project="byol_pytorh_test",
+                                   entity="tomo",
+                                   name="pretrain-byol",
+                                   log_model=False,
+                                   config=args)
+        lightning_loggers.append(wandb_logger)
+
+    checkpoint_root_path = os.path.join(args.result_path, "checkpoints_root")
+    checkpoint_callback = ModelCheckpoint(
+        save_top_k=-1,
+        monitor="step",
+        mode="max",
+        # every_n_train_steps=1,
+        dirpath=checkpoint_root_path,
+        every_n_epochs=1,
+        filename="byol-{epoch:04d}-{step}",
+        verbose=False)
+
     trainer = pl.Trainer(
         gpus=ngpus,
         num_nodes=node_num,
         # num_processes=ngpus,
         max_epochs=EPOCHS,
+        callbacks=[checkpoint_callback],
         enable_checkpointing=True,
         accumulate_grad_batches=1,
         sync_batchnorm=True,
         accelerator="gpu",
         strategy="ddp",
-        logger=logger,
+        logger=lightning_loggers,
         log_every_n_steps=1,
         default_root_dir=args.result_path)
+
     print_rank("start train")
+    logger.info("start train")
 
     trainer.fit(model, train_loader)
 
