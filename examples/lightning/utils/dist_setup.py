@@ -34,8 +34,8 @@ def dist_setup(backend="nccl"):
 
     str_print = f"Rank: {dist.get_rank()}, Size: {dist.get_world_size()}, "
     str_print += f"Host: {master_addr}, Local Rank: {local_rank}, "
-    str_print += f"NODE_RANK: {node_rank}, Local Size: {local_size}, "
-    str_print += f"Node_num: {node_num}"
+    str_print += f"Node Rank: {node_rank}, Local Size: {local_size}, "
+    str_print += f"Node Size: {node_num}"
     print(str_print)
 
 
