@@ -26,6 +26,7 @@ parser.add_argument(
     type=str,
     required=True,
     help='path to your folder of images for self-supervised learning')
+parser.add_argument("--subset", type=str, default="", help='subset name')
 
 parser.add_argument("--batch_size", type=int, default=256, help='bacth size')
 parser.add_argument("--epochs", type=int, default=1000, help='epochs')
@@ -97,12 +98,13 @@ def expand_greyscale(t):
 
 class ImagesDataset(Dataset):
 
-    def __init__(self, folder, image_size, subset=None):
+    def __init__(self, folder, image_size, subset=""):
         super().__init__()
         self.folder = folder
         self.paths = []
         self.subset = subset
-        ds_root = f"{folder}/{subset}" if subset else f"{folder}"
+        use_subset = subset != "" or subset is not None
+        ds_root = f"{folder}/{subset}" if use_subset else f"{folder}"
 
         for path in Path(ds_root).glob('**/*'):
             _, ext = os.path.splitext(path)
@@ -150,7 +152,11 @@ if __name__ == '__main__':
     print_rank("start main")
     # print_rank("start main num_workers:", num_workers)
     # train_ds = ImagesDataset(args.image_folder, IMAGE_SIZE)
-    train_ds = ImagesDataset(args.image_folder, IMAGE_SIZE, "train")
+    # train_ds = ImagesDataset(args.image_folder, IMAGE_SIZE, "train")
+    # subset_prefix = "ILSVRC2012_img_"
+    # subset = subset_prefix + "train"
+    subset = args.subset
+    train_ds = ImagesDataset(args.image_folder, IMAGE_SIZE, subset)
     train_loader = DataLoader(train_ds,
                               batch_size=local_batch_size,
                               num_workers=num_workers,
