@@ -1,5 +1,6 @@
 import os
 import argparse
+import logging
 import multiprocessing
 from pathlib import Path
 from PIL import Image
@@ -11,7 +12,6 @@ from torch.utils.data import DataLoader, Dataset
 from byol_pytorch import BYOL
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
-# from pytorch_lightning import logging
 
 from utils import dist_setup, dist_cleanup
 from utils import print_rank, myget_rank_size
@@ -29,10 +29,12 @@ parser.add_argument(
 
 parser.add_argument("--batch_size", type=int, default=256, help='bacth size')
 parser.add_argument("--epochs", type=int, default=1000, help='epochs')
-parser.add_argument("--num_gpus", type=int, default=2, help='num_gpus')
 parser.add_argument("--lr", type=float, default=3e-4, help='lr')
 parser.add_argument("--imaeg_size", type=int, default=256, help='image_size')
 parser.add_argument("--resnet_pretrain", action="store_true")
+parser.add_argument("--logging_set_detail",
+                    action="store_true",
+                    help="log detail for debug")
 
 parser.add_argument("--result_path",
                     type=str,
@@ -40,6 +42,9 @@ parser.add_argument("--result_path",
                     help='path to your folder of result')
 
 args = parser.parse_args()
+
+if args.logging_set_detail:
+    logging.getLogger("pytorch_lightning").setLevel(pl._DETAIL)
 
 dist_setup()
 
@@ -52,7 +57,7 @@ resnet = models.resnet50(pretrained=args.resnet_pretrain)
 BATCH_SIZE = args.batch_size
 EPOCHS = args.epochs
 LR = args.lr
-NUM_GPUS = args.num_gpus
+NUM_GPUS = 2
 IMAGE_SIZE = args.imaeg_size
 IMAGE_EXTS = ['.jpg', '.png', '.jpeg']
 NUM_WORKERS = multiprocessing.cpu_count()
