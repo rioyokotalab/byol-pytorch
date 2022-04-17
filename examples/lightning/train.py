@@ -95,8 +95,11 @@ class SelfSupervisedLearner(pl.LightningModule):
             max_steps = progress_callback.main_progress_bar.total
         epoch = self.current_epoch
         global_step = self.global_step
+        local_step = global_step
+        if progress_callback is not None:
+            local_step = global_step % max_steps
         head = f"Epoch: [{epoch}/{max_epochs}] "
-        head += f"Iters: [{global_step}/{max_steps}]"
+        head += f"Iters: [{local_step}/{max_steps}]"
         logger.info(f"{head} train/loss: {loss}")
 
         return {'loss': loss}
