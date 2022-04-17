@@ -45,6 +45,10 @@ parser.add_argument("--result_path",
                     type=str,
                     required=True,
                     help='path to your folder of result')
+parser.add_argument("--resume_path",
+                    type=str,
+                    default="",
+                    help='path to your folder of resume')
 
 args = parser.parse_args()
 
@@ -101,6 +105,8 @@ class SelfSupervisedLearner(pl.LightningModule):
         head = f"Epoch: [{epoch}/{max_epochs}] "
         head += f"Iters: [{local_step}/{max_steps}]"
         logger.info(f"{head} train/loss: {loss}")
+
+        self.log("train/iters", global_step)
 
         return {'loss': loss}
 
@@ -272,6 +278,6 @@ if __name__ == '__main__':
     print_rank("start train")
     logger.info("start train")
 
-    trainer.fit(model, train_loader)
+    trainer.fit(model, train_loader, ckpt_path=args.resume_path)
 
     dist_cleanup()
