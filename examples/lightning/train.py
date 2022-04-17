@@ -37,6 +37,7 @@ parser.add_argument("--epochs", type=int, default=1000, help='epochs')
 parser.add_argument("--lr", type=float, default=3e-4, help='lr')
 parser.add_argument("--imaeg_size", type=int, default=256, help='image_size')
 parser.add_argument("--resnet_pretrain", action="store_true")
+parser.add_argument("--accumulate_grad_batches", type=int, default=1)
 parser.add_argument("--logging_set_detail",
                     action="store_true",
                     help="log detail for debug")
@@ -199,6 +200,8 @@ if __name__ == '__main__':
     ##########################################################################
 
     local_batch_size = BATCH_SIZE // world_size
+    acc_grad_num = args.accumulate_grad_batches
+    # local_batch_size = local_batch_size // acc_grad_num
 
     print_rank("start main")
     logger.info("start main")
@@ -267,7 +270,7 @@ if __name__ == '__main__':
         max_epochs=EPOCHS,
         callbacks=[checkpoint_callback],
         enable_checkpointing=True,
-        accumulate_grad_batches=1,
+        accumulate_grad_batches=acc_grad_num,
         sync_batchnorm=True,
         accelerator="gpu",
         strategy="ddp",
