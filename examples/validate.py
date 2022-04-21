@@ -14,6 +14,22 @@ import torch.nn.functional as F
 from resnet import resnet50, resnet200
 
 
+def checkpotin2model(checkpoint):
+    if "state_dict" not in checkpoint:
+        return checkpoint
+    state_dict = checkpoint["state_dict"]
+    out = {}
+    for k, v in state_dict.items():
+        if "online_encoder" in k:
+            if "projector" in k:
+                continue
+            key = k.replace("learner.", "")
+            key = key.replace("online_encoder.", "")
+            key = key.replace("net.", "")
+            out[key] = v
+    return out
+
+
 # mpi setup
 def dist_setup(backend="nccl"):
     master_addr = os.getenv("MASTER_ADDR", default="localhost")
@@ -122,7 +138,7 @@ def main():
 
     state_dict = torch.load(args.wts)
     if "state_dict" in state_dict:
-        state_dict = state_dict["state_dict"]
+        state_dict = checkpotin2model(state_dict)
     model.load_state_dict(state_dict)
     if args.use_dist:
         model.to(device)
