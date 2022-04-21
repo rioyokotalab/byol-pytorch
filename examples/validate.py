@@ -1,14 +1,10 @@
 import argparse
 import os
-import random
-import shutil
 import time
-import warnings
 
 import torch
-import torch.nn as nn
-import torch.nn.parallel
-import torch.backends.cudnn as cudnn
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.optim
 import torch.utils.data
 from torch.utils.data import DataLoader
@@ -17,26 +13,89 @@ import torchvision.datasets as datasets
 import torch.nn.functional as F
 from resnet import resnet50, resnet200
 
-parser = argparse.ArgumentParser(
-    description='Validate converted PyTorch weights')
+
+# mpi setup
+def dist_setup(backend="nccl"):
+    master_addr = os.getenv("MASTER_ADDR", default="localhost")
+    master_port = os.getenv("MASTER_POST", default="8888")
+    method = "tcp://{}:{}".format(master_addr, master_port)
+    rank = int(os.getenv("OMPI_COMM_WORLD_RANK", "0"))
+    world_size = int(os.getenv("OMPI_COMM_WORLD_SIZE", "1"))
+    if backend == "mpi":
+        rank, world_size = -1, -1
+    dist.init_process_group(backend=backend,
+                            init_method=method,
+                            rank=rank,
+                            world_size=world_size)
+
+    print("Rank: {}, Size: {}, Host: {}".format(dist.get_rank(),
+                                                dist.get_world_size(),
+                                                master_addr))
+
+
+def dist_cleanup():
+    if dist.is_initialized():
+        dist.destroy_process_group()
+
+
+def myget_rank():
+    rank = 0
+    if dist.is_initialized():
+        rank = dist.get_rank()
+    return rank
+
+
+def myget_rank_size():
+    rank = myget_rank()
+    size = 1
+    if dist.is_initialized():
+        size = dist.get_world_size()
+    return rank, size
+
+
+# multi process print
+def print_rank(*args):
+    rank = myget_rank()
+    print(f"rank: {rank}", *args)
+
+
+def print0(*args):
+    rank = myget_rank()
+    if rank == 0:
+        print(*args)
+
+
+parser = argparse.ArgumentParser(description="Validate PyTorch weights")
 parser.add_argument(
-    'wts',
-    default='pretrain_res50x1.pth.tar',
+    "--wts",
+    default="pretrain_res50x1.pth.tar",
     type=str,
-    help='PyTorch weights to validate with imagenet validation set')
-parser.add_argument('valdir',
-                    default='/datasets/imagenet/val',
+    help="PyTorch weights to validate with imagenet validation set")
+parser.add_argument("--valdir",
+                    default="/datasets/imagenet/val",
                     type=str,
-                    help='path to imagenet val directory')
-parser.add_argument('model',
-                    default='resnet50',
+                    help="path to imagenet val directory")
+parser.add_argument("--model",
+                    default="resnet50",
                     type=str,
-                    help='Model name. Valid: resnet50, resnet200')
+                    help="Model name. Valid: resnet50, resnet200")
+parser.add_argument("--use_dist",
+                    action="store_true",
+                    help="use dist by torch option")
 
 
 def main():
-    print("start main")
     args = parser.parse_args()
+
+    if args.use_dist:
+        dist_setup()
+        rank, _ = myget_rank_size()
+        ngpus = torch.cuda.device_count()
+        local_rank = rank % ngpus
+        torch.cuda.set_device(local_rank)
+        device = torch.device("cuda", local_rank)
+
+    print_rank("start main")
 
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
@@ -62,8 +121,13 @@ def main():
         model = resnet50(num_classes=1000).cuda()
 
     state_dict = torch.load(args.wts)
+    if "state_dict" in state_dict:
+        state_dict = state_dict["state_dict"]
     model.load_state_dict(state_dict)
-    print("setup complete")
+    if args.use_dist:
+        model.to(device)
+        model = DDP(model, device_ids=[local_rank], output_device=local_rank)
+    print_rank("setup complete")
 
     validate(val_loader, model)
 
@@ -78,7 +142,7 @@ def validate(val_loader, model):
 
     model.eval()
 
-    print("start val")
+    print_rank("start val")
     with torch.no_grad():
         end = time.time()
         for i, (images, target) in enumerate(val_loader):
@@ -100,10 +164,10 @@ def validate(val_loader, model):
             end = time.time()
 
             if i % 10 == 0:
-                print(progress.display(i))
+                print_rank(progress.display(i))
 
-        print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'.format(top1=top1,
-                                                                    top5=top5))
+        print_rank(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'.format(
+            top1=top1, top5=top5))
 
     return top1.avg
 
