@@ -208,7 +208,7 @@ def train(model, train_loader, optimizer, lr_scheduler, epoch, all_epoch,
                              prefix='Train: ')
 
     len_loader = len(train_loader)
-    global_step = epoch * len_loader
+    initial_step = epoch * len_loader
     train_s_time = time.perf_counter()
     rank = myget_rank()
     model.train()
@@ -242,7 +242,7 @@ def train(model, train_loader, optimizer, lr_scheduler, epoch, all_epoch,
         batch_exec_time = batch_e_time - batch_s_time
         batch_time.update(batch_exec_time)
         losses.update(loss.item(), image.size(0))
-        global_step += batch_idx
+        global_step = initial_step + batch_idx
 
         head = f"epoch: {epoch}/{all_epoch} "
         head += f"batch idx: {global_step} {batch_idx}/{len_loader}"
