@@ -217,13 +217,15 @@ def train(model, train_loader, optimizer, lr_scheduler, epoch, all_epoch,
         image = image.to(device)
         logger.info(f"batch_idx: {batch_idx}, after load")
         if rank == 0:
-            print_rank("after load:", torch.cuda.memory_allocated(device))
+            logger.info(
+                f"after load memory: {torch.cuda.memory_allocated(device)}")
         batch_s_time = time.perf_counter()
 
         loss = model(image)
 
         if rank == 0:
-            print_rank("after forward:", torch.cuda.memory_allocated(device))
+            logger.info(
+                f"after forward memory: {torch.cuda.memory_allocated(device)}")
 
         optimizer.zero_grad()
         loss.backward()
@@ -232,7 +234,9 @@ def train(model, train_loader, optimizer, lr_scheduler, epoch, all_epoch,
         lr_scheduler.step()
 
         if rank == 0:
-            print_rank("after backward:", torch.cuda.memory_allocated(device))
+            logger.info(
+                f"after backward memory: {torch.cuda.memory_allocated(device)}"
+            )
 
         batch_e_time = time.perf_counter()
         batch_exec_time = batch_e_time - batch_s_time
@@ -244,7 +248,7 @@ def train(model, train_loader, optimizer, lr_scheduler, epoch, all_epoch,
         head += f"batch idx: {global_step} {batch_idx}/{len_loader}"
 
         print_rank(head, f"loss: {loss}")
-        print_rank(head, f"sec/batch: {batch_exec_time}")
+        print_rank(head, f"sec/batch: {batch_exec_time}s")
         logger.info(progress.display(batch_idx))
 
         if rank == 0:
@@ -254,7 +258,7 @@ def train(model, train_loader, optimizer, lr_scheduler, epoch, all_epoch,
             wandb.log({"iters": global_step})
     total_e_time = time.perf_counter()
     total_exec_time = total_e_time - train_s_time
-    print_rank(epoch, "total_e_time:", total_exec_time)
+    print_rank(epoch, "total_e_time:", total_exec_time, "s")
     return losses, progress
 
 
