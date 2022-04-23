@@ -410,9 +410,7 @@ def main():
             wandb.log({"epoch/train/loss/avg": losses.avg}, commit=False)
             wandb.log({"epoch/train/loss/base": losses.val}, commit=False)
             wandb.log({"epoch": epoch})
-            state_dict = model.state_dict()
-            if args.multiprocess:
-                state_dict = model.module.state_dict()
+            state_dict = model.module.state_dict()
             torch.save(
                 {
                     "epoch": epoch + 1,
