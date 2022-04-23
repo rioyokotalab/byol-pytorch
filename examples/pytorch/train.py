@@ -418,9 +418,8 @@ def main():
                     "optimizer": optimizer.state_dict(),
                     "scheduler": lr_scheduler.state_dict(),
                 },
-                is_best=False,
-                filename=os.path.join(
-                    resume_dir, "checkpoint_{:04d}.pth.tar".format(epoch)))
+                os.path.join(resume_dir,
+                             "checkpoint_{:04d}.pth.tar".format(epoch)))
 
 
 # main
