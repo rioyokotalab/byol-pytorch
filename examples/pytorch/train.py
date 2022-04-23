@@ -200,7 +200,8 @@ class ProgressMeter(object):
         return '[' + fmt + '/' + fmt.format(num_batches) + ']'
 
 
-def train(model, train_loader, optimizer, lr_scheduler, epoch, device, logger):
+def train(model, train_loader, optimizer, lr_scheduler, epoch, all_epoch,
+          device, logger):
     batch_time = AverageMeter('Time', ':6.3f')
     losses = AverageMeter('Loss', ':.4e')
     progress = ProgressMeter(len(train_loader), [batch_time, losses],
@@ -218,7 +219,6 @@ def train(model, train_loader, optimizer, lr_scheduler, epoch, device, logger):
         if rank == 0:
             print_rank("after load:", torch.cuda.memory_allocated(device))
         batch_s_time = time.perf_counter()
-        head = f"batch idx: {batch_idx}/{len_loader}"
 
         loss = model(image)
 
@@ -240,15 +240,18 @@ def train(model, train_loader, optimizer, lr_scheduler, epoch, device, logger):
         losses.update(loss.item(), image.size(0))
         global_step += batch_idx
 
+        head = f"epoch: {epoch}/{all_epoch} "
+        head += f"batch idx: {global_step} {batch_idx}/{len_loader}"
+
         print_rank(head, f"loss: {loss}")
         print_rank(head, f"sec/batch: {batch_exec_time}")
         logger.info(progress.display(batch_idx))
 
         if rank == 0:
-            wandb.log({"train/loss": loss}, commit=False)
-            wandb.log({"train/sec_batch": batch_exec_time}, commit=False)
-            wandb.log({"train/avg/loss": losses.avg}, commit=False)
-            wandb.log({"train/iters": global_step})
+            wandb.log({"iters/train/loss": loss}, commit=False)
+            wandb.log({"iters/train/sec_batch": batch_exec_time}, commit=False)
+            wandb.log({"iters/train/avg/loss": losses.avg}, commit=False)
+            wandb.log({"iters": global_step})
     total_e_time = time.perf_counter()
     total_exec_time = total_e_time - train_s_time
     print_rank(epoch, "total_e_time:", total_exec_time)
@@ -403,8 +406,9 @@ def main():
 
     logger.info("start train")
     for epoch in range(start_epoch, EPOCHS):
+        logger.info(f"start epoch {epoch}")
         losses, progress = train(model, train_loader, optimizer, lr_scheduler,
-                                 epoch, device, logger)
+                                 epoch, EPOCHS, device, logger)
 
         if rank == 0:
             wandb.log({"epoch/train/loss/avg": losses.avg}, commit=False)
