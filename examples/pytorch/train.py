@@ -200,7 +200,7 @@ class ProgressMeter(object):
         return '[' + fmt + '/' + fmt.format(num_batches) + ']'
 
 
-def train(model, train_loader, optimizer, lr_scheduler, epoch, logger):
+def train(model, train_loader, optimizer, lr_scheduler, epoch, device, logger):
     batch_time = AverageMeter('Time', ':6.3f')
     losses = AverageMeter('Loss', ':.4e')
     progress = ProgressMeter(len(train_loader), [batch_time, losses],
@@ -213,16 +213,26 @@ def train(model, train_loader, optimizer, lr_scheduler, epoch, logger):
     model.train()
 
     for batch_idx, image in enumerate(train_loader):
+        image = image.to(device)
+        logger.info(f"batch_idx: {batch_idx}, after load")
+        if rank == 0:
+            print_rank("after load:", torch.cuda.memory_allocated(device))
         batch_s_time = time.perf_counter()
         head = f"batch idx: {batch_idx}/{len_loader}"
 
         loss = model(image)
+
+        if rank == 0:
+            print_rank("after forward:", torch.cuda.memory_allocated(device))
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
         model(image, use_momentum=True)
         lr_scheduler.step()
+
+        if rank == 0:
+            print_rank("after backward:", torch.cuda.memory_allocated(device))
 
         batch_e_time = time.perf_counter()
         batch_exec_time = batch_e_time - batch_s_time
@@ -301,6 +311,7 @@ def main():
     is_cuda = torch.cuda.is_available()
     local_rank, node_num = 0, 1
     num_workers, ngpus = NUM_WORKERS // node_num, 1
+    device = torch.device("cpu")
     if is_cuda:
         ngpus = torch.cuda.device_count()
         args.num_gpus = ngpus
@@ -354,7 +365,10 @@ def main():
         lr_scheduler.load_state_dict(checkpoint["scheduler"])
 
     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
-    model = DDP(model, device_ids=[local_rank], output_device=local_rank)
+    model = DDP(model,
+                device_ids=[local_rank],
+                output_device=local_rank,
+                find_unused_parameters=True)
 
     if rank == 0:
         wandb.init(project="byol_pytorh_test",
@@ -387,9 +401,10 @@ def main():
     resume_dir = os.path.join(args.result_path, "resume")
     os.makedirs(resume_dir, exist_ok=True)
 
+    logger.info("start train")
     for epoch in range(start_epoch, EPOCHS):
         losses, progress = train(model, train_loader, optimizer, lr_scheduler,
-                                 epoch, logger)
+                                 epoch, device, logger)
 
         if rank == 0:
             wandb.log({"epoch/train/loss/avg": losses.avg}, commit=False)
