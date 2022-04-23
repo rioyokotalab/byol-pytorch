@@ -88,9 +88,34 @@ class SelfSupervisedLearner(nn.Module):
             return
         return self.learner(images)
 
+    @torch.no_grad()
     def on_before_zero_grad(self):
         if self.learner.use_momentum:
             self.learner.update_moving_average()
+
+    def exclude_from_wt_decay(self, weight_decay, skip_list=("bias", "bn")):
+        named_params = self.named_parameters()
+        params = []
+        excluded_params = []
+
+        for name, param in named_params:
+            if not param.requires_grad:
+                continue
+            elif any(layer_name in name for layer_name in skip_list):
+                excluded_params.append(param)
+            else:
+                params.append(param)
+
+        return [
+            {
+                "params": params,
+                "weight_decay": weight_decay
+            },
+            {
+                "params": excluded_params,
+                "weight_decay": 0.0,
+            },
+        ]
 
 
 # images dataset
@@ -185,12 +210,15 @@ def train(model, train_loader, optimizer, lr_scheduler, epoch, logger):
     global_step = epoch * len_loader
     train_s_time = time.perf_counter()
     rank = myget_rank()
+    model.train()
+
     for batch_idx, image in enumerate(train_loader):
         batch_s_time = time.perf_counter()
         head = f"batch idx: {batch_idx}/{len_loader}"
 
-        optimizer.zero_grad()
         loss = model(image)
+
+        optimizer.zero_grad()
         loss.backward()
         optimizer.step()
         model(image, use_momentum=True)
@@ -307,14 +335,15 @@ def main():
     #                              lr=args.lr,
     #                              weight_decay=args.weight_decay)
     # optimizer = LARSWrapper(optimizer)
-    optimizer = LARS(model.parameters(),
+    params = model.exclude_from_wt_decay(weight_decay=args.weight_decay)
+    optimizer = LARS(params,
                      lr=args.lr,
+                     momentum=0.9,
                      weight_decay=args.weight_decay)
     global_steps = EPOCHS * len(train_loader)
     warmup_steps = 10 * len(train_loader)
     lr_scheduler = CosineDecayLinearLRScheduler(optimizer, global_batch_size,
-                                                args.lr, global_steps,
-                                                warmup_steps)
+                                                global_steps, warmup_steps)
     start_epoch = 0
 
     if args.resume_path != "":
