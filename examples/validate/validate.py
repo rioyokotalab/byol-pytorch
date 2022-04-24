@@ -27,6 +27,7 @@ def checkpotin2model(checkpoint):
             key = key.replace("online_encoder.", "")
             key = key.replace("net.", "")
             out[key] = v
+    # print_rank("load state dict:", out)
     return out
 
 
@@ -144,6 +145,7 @@ def main():
         model.to(device)
         model = DDP(model, device_ids=[local_rank], output_device=local_rank)
     print_rank("setup complete")
+    print_rank("model:", model)
 
     validate(val_loader, model)
 
