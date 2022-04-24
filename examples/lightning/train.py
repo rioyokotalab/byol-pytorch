@@ -21,6 +21,10 @@ from utils import dist_setup, dist_cleanup
 from utils import print_rank, myget_rank_size
 from utils import myget_local_rank, myget_node_size
 
+_LR_PRESETS = {40: 0.45, 100: 0.45, 300: 0.3, 1000: 0.2}
+_WD_PRESETS = {40: 1e-6, 100: 1e-6, 300: 1e-6, 1000: 1.5e-6}
+_EMA_PRESETS = {40: 0.97, 100: 0.99, 300: 0.99, 1000: 0.996}
+
 # arguments
 
 parser = argparse.ArgumentParser(description="byol-lightning-test")
@@ -34,7 +38,7 @@ parser.add_argument("--subset", type=str, default="", help='subset name')
 
 parser.add_argument("--batch_size", type=int, default=256, help='bacth size')
 parser.add_argument("--epochs", type=int, default=1000, help='epochs')
-parser.add_argument("--lr", type=float, default=3e-4, help='lr')
+# parser.add_argument("--lr", type=float, default=3e-4, help='lr')
 parser.add_argument("--imaeg_size", type=int, default=256, help='image_size')
 parser.add_argument("--resnet_pretrain", action="store_true")
 parser.add_argument("--accumulate_grad_batches", type=int, default=1)
@@ -66,6 +70,7 @@ resnet = models.resnet50(pretrained=args.resnet_pretrain)
 
 BATCH_SIZE = args.batch_size
 EPOCHS = args.epochs
+args.lr = _LR_PRESETS[EPOCHS]
 LR = args.lr
 NUM_GPUS = 2
 IMAGE_SIZE = args.imaeg_size
@@ -222,13 +227,14 @@ if __name__ == '__main__':
     #                         num_workers=NUM_WORKERS,
     #                         shuffle=False)
 
+    moving_average_decay = _EMA_PRESETS[EPOCHS]
     model = SelfSupervisedLearner(resnet,
-                                  lr=args.lr,
+                                  lr=args.lr * world_size,
                                   image_size=IMAGE_SIZE,
                                   hidden_layer='avgpool',
                                   projection_size=256,
                                   projection_hidden_size=4096,
-                                  moving_average_decay=0.99,
+                                  moving_average_decay=moving_average_decay,
                                   use_momentum=True)
 
     print_rank("start setup train")
