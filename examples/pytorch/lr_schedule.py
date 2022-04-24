@@ -11,18 +11,23 @@ class CosineDecayLinearLRScheduler(_LRScheduler):
                  batch_size: int,
                  total_steps: int,
                  warmup_steps: int,
+                 all_gpus: int = 1,
                  verbose: bool = False):
         self.batch_size = batch_size
         self.total_steps = total_steps
         self.warmup_steps = warmup_steps
+        self.all_gpus = all_gpus
         super().__init__(optimizer, verbose=verbose)
 
     def get_lr(self):
-        return [
-            learning_schedule(self.last_epoch, self.batch_size, base_lr,
-                              self.total_steps, self.warmup_steps)
-            for base_lr in self.base_lrs
-        ]
+        lrs = []
+        for base_lr in self.base_lrs:
+            base_lr = base_lr / self.all_gpus
+            lr = learning_schedule(self.last_epoch, self.batch_size, base_lr,
+                                   self.total_steps, self.warmup_steps)
+            lr = lr * self.all_gpus
+            lrs.append(lr)
+        return lrs
 
 
 # Implemented by official byol:

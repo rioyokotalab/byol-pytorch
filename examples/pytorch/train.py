@@ -347,7 +347,6 @@ def main():
                                   projection_hidden_size=4096,
                                   moving_average_decay=args.momentum,
                                   use_momentum=True)
-    model = model.to(device)
 
     # optimizer = torch.optim.Adam(model.parameters(),
     #                              lr=args.lr,
@@ -355,27 +354,38 @@ def main():
     # optimizer = LARSWrapper(optimizer)
     params = model.exclude_from_wt_decay(weight_decay=args.weight_decay)
     optimizer = LARS(params,
-                     lr=args.lr,
+                     lr=args.lr * world_size,
                      momentum=0.9,
                      weight_decay=args.weight_decay)
     global_steps = EPOCHS * len(train_loader)
     warmup_steps = 10 * len(train_loader)
-    lr_scheduler = CosineDecayLinearLRScheduler(optimizer, global_batch_size,
-                                                global_steps, warmup_steps)
+    lr_scheduler = CosineDecayLinearLRScheduler(optimizer,
+                                                global_batch_size,
+                                                global_steps,
+                                                warmup_steps,
+                                                world_size,
+                                                verbose=True)
     start_epoch = 0
 
     if args.resume_path != "":
-        checkpoint = torch.load(args.resume_path)
+        checkpoint = torch.load(args.resume_path, map_location="cpu")
         start_epoch = checkpoint["epoch"]
         model.load_state_dict(checkpoint["state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer"])
         lr_scheduler.load_state_dict(checkpoint["scheduler"])
+        lr_scheduler.total_steps = global_steps
 
+    model = model.to(device)
     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = DDP(model,
                 device_ids=[local_rank],
                 output_device=local_rank,
                 find_unused_parameters=True)
+
+    for state in optimizer.state.values():
+        for k, v in state.items():
+            if isinstance(v, torch.Tensor):
+                state[k] = v.to(device)
 
     if rank == 0:
         wandb.init(project="byol_pytorh_test",
