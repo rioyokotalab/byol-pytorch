@@ -9,6 +9,7 @@ from PIL import Image
 import torch
 from torchvision import models, transforms
 from torch.utils.data import DataLoader, Dataset
+import torch.nn.functional as F
 
 from byol_pytorch import BYOL
 import pytorch_lightning as pl
@@ -86,6 +87,9 @@ class SelfSupervisedLearner(pl.LightningModule):
         super().__init__()
         self.learner = BYOL(net, **kwargs)
         self.lr = lr
+        self.top1 = AverageMeter('Acc@1', ':6.2f')
+        self.top5 = AverageMeter('Acc@5', ':6.2f')
+        self.losses = AverageMeter('Loss', ':.4e')
 
     def forward(self, images):
         return self.learner(images)
@@ -116,12 +120,108 @@ class SelfSupervisedLearner(pl.LightningModule):
 
         return {'loss': loss}
 
+    def validation_step(self, batch, batch_idx):
+        images, target = batch
+        output = self.learner.online_encoder.net(images)
+        loss = F.cross_entropy(output, target)
+        epoch = self.current_epoch
+
+        acc1, acc5 = accuracy(output, target, topk=(1, 5))
+        self.losses.update(loss.item(), images.size(0))
+        self.top1.update(acc1[0], images.size(0))
+        self.top5.update(acc5[0], images.size(0))
+
+        self.log(f"val/loss/{epoch}", loss)
+        self.log(f"val/acc1/{epoch}", acc1)
+        self.log(f"val/acc5/{epoch}", acc5)
+        logger.info(f"epoch: {epoch} {batch_idx} val/loss: {loss}")
+        return {"loss": loss.item(), "acc1": acc1, "acc5": acc5}
+
+    def validation_epoch_end(self, outputs) -> None:
+        print_rank(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'.format(
+            top1=self.top1, top5=self.top5))
+        logger.info(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'.format(
+            top1=self.top1, top5=self.top5))
+        epoch = self.current_epoch
+        self.log("epoch/val/loss", self.losses.avg)
+        self.log("epoch/val/acc1", self.acc1.avg)
+        self.log("epoch/val/acc5", self.acc5.avg)
+        logger.info(f"epoch: {epoch} end val/loss: {self.losses.avg}")
+        self.top1.reset()
+        self.top5.reset()
+        self.losses.reset()
+
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.lr)
 
     def on_before_zero_grad(self, _):
         if self.learner.use_momentum:
             self.learner.update_moving_average()
+
+
+class AverageMeter(object):
+    """Computes and stores the average and current value"""
+
+    def __init__(self, name, fmt=':f'):
+        self.name = name
+        self.fmt = fmt
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
+
+    def __str__(self):
+        fmtstr = '{name} {val' + self.fmt + '} ({avg' + self.fmt + '})'
+        return fmtstr.format(**self.__dict__)
+
+
+class ProgressMeter(object):
+
+    def __init__(self, num_batches, meters, prefix=""):
+        self.batch_fmtstr = self._get_batch_fmtstr(num_batches)
+        self.meters = meters
+        self.prefix = prefix
+
+    def display(self, batch):
+        entries = [self.prefix + self.batch_fmtstr.format(batch)]
+        entries += [str(meter) for meter in self.meters]
+        return '\t'.join(entries)
+
+    def _get_batch_fmtstr(self, num_batches):
+        num_digits = len(str(num_batches // 1))
+        fmt = '{:' + str(num_digits) + 'd}'
+        return '[' + fmt + '/' + fmt.format(num_batches) + ']'
+
+
+def accuracy(output, target, topk=(1, )):
+    """
+    Computes the accuracy over the k top predictions
+    for the specified values of k
+    """
+    with torch.no_grad():
+        maxk = max(topk)
+        batch_size = target.size(0)
+
+        _, pred = output.topk(maxk, 1, True, True)
+        pred = pred.t()
+        # correct = pred.eq(target.view(1, -1).expand_as(pred))
+        correct = pred.eq(target.reshape(1, -1).expand_as(pred))
+
+        res = []
+        for k in topk:
+            # correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
+            correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
+            res.append(correct_k.mul_(100.0 / batch_size))
+        return res
 
 
 # images dataset
@@ -221,11 +321,11 @@ if __name__ == '__main__':
                               batch_size=local_batch_size,
                               num_workers=num_workers,
                               shuffle=True)
-    # val_ds = ImagesDataset(args.image_folder, IMAGE_SIZE, "val")
-    # val_loader = DataLoader(val_ds,
-    #                         batch_size=local_batch_size,
-    #                         num_workers=NUM_WORKERS,
-    #                         shuffle=False)
+    val_ds = ImagesDataset(args.image_folder, IMAGE_SIZE, "val")
+    val_loader = DataLoader(val_ds,
+                            batch_size=local_batch_size,
+                            num_workers=NUM_WORKERS,
+                            shuffle=False)
 
     moving_average_decay = _EMA_PRESETS[EPOCHS]
     model = SelfSupervisedLearner(resnet,
@@ -277,7 +377,8 @@ if __name__ == '__main__':
         callbacks=[checkpoint_callback],
         enable_checkpointing=True,
         accumulate_grad_batches=acc_grad_num,
-        sync_batchnorm=True,
+        # sync_batchnorm=True,
+        sync_batchnorm=False,
         accelerator="gpu",
         strategy="ddp",
         logger=lightning_loggers,
@@ -287,6 +388,9 @@ if __name__ == '__main__':
     print_rank("start train")
     logger.info("start train")
 
-    trainer.fit(model, train_loader, ckpt_path=args.resume_path)
+    trainer.fit(model,
+                train_loader,
+                val_dataloaders=val_loader,
+                ckpt_path=args.resume_path)
 
     dist_cleanup()
