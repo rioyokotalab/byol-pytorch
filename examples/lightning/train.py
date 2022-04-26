@@ -8,6 +8,7 @@ from PIL import Image
 
 import torch
 from torchvision import models, transforms
+import torchvision.datasets as datasets
 from torch.utils.data import DataLoader, Dataset
 import torch.nn.functional as F
 
@@ -144,8 +145,8 @@ class SelfSupervisedLearner(pl.LightningModule):
             top1=self.top1, top5=self.top5))
         epoch = self.current_epoch
         self.log("epoch/val/loss", self.losses.avg)
-        self.log("epoch/val/acc1", self.acc1.avg)
-        self.log("epoch/val/acc5", self.acc5.avg)
+        self.log("epoch/val/acc1", self.top1.avg)
+        self.log("epoch/val/acc5", self.top5.avg)
         logger.info(f"epoch: {epoch} end val/loss: {self.losses.avg}")
         self.top1.reset()
         self.top5.reset()
@@ -281,6 +282,7 @@ if __name__ == '__main__':
         num_workers = num_workers // node_num
         # torch.cuda.set_device(local_rank)
         # device = torch.device("cuda", local_rank)
+    num_workers = 8
 
     ##########################################################################
     # log file prepare
@@ -321,11 +323,24 @@ if __name__ == '__main__':
                               batch_size=local_batch_size,
                               num_workers=num_workers,
                               shuffle=True)
-    val_ds = ImagesDataset(args.image_folder, IMAGE_SIZE, "val")
-    val_loader = DataLoader(val_ds,
-                            batch_size=local_batch_size,
-                            num_workers=NUM_WORKERS,
-                            shuffle=False)
+
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
+
+    val_transform = transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        normalize,
+    ])
+    valdir = os.path.join(args.image_folder, "val")
+    val_loader = DataLoader(
+        datasets.ImageFolder(valdir, val_transform),
+        batch_size=32,
+        shuffle=False,
+        num_workers=8,
+        pin_memory=True,
+    )
 
     moving_average_decay = _EMA_PRESETS[EPOCHS]
     model = SelfSupervisedLearner(resnet,
